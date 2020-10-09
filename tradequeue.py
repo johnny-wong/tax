@@ -51,17 +51,18 @@ class TradeQueue:
             idx, next_unpaired_trade = self.get_next_unpaired_trade(
                 trade.instrument, trade.trade_dt
             )
-            if next_unpaired_trade.qty > qty_to_pair:
-                excess_qty = next_unpaired_trade.qty - qty_to_pair
+            left_to_pair = qty_to_pair - paired_qty
+            if next_unpaired_trade.qty > left_to_pair:
+                excess_unpaired_qty = next_unpaired_trade.qty - left_to_pair
                 paired_trade = Trade(
                     instrument=trade.instrument,
-                    qty=qty_to_pair,
+                    qty=left_to_pair,
                     price=next_unpaired_trade.price,
                     trade_dt=next_unpaired_trade.trade_dt,
                 )
                 paired_trades.paired_trades.append(paired_trade)
                 adjusted_unpaired_trade = next_unpaired_trade
-                adjusted_unpaired_trade.qty = excess_qty
+                adjusted_unpaired_trade.qty = excess_unpaired_qty
                 self.unpaired_trades[idx] = adjusted_unpaired_trade
                 self.paired_trades.append(paired_trades)
                 return None

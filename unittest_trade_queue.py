@@ -129,6 +129,36 @@ class TestTradeQueue(unittest.TestCase):
         ]
         self.assertEqual(trade_queue.paired_trades, paired_trades)
 
+    def test_multiple_matchings(self):
+        trades = [
+            Trade("BTC", Decimal("1"), 10000, dt.datetime.today()),
+            Trade("BTC", Decimal("0.5"), 11000, dt.datetime.today()),
+            Trade("BTC", Decimal("-1.2"), 11500, dt.datetime.today()),
+        ]
+
+        trade_queue = TradeQueue("BTC", is_fifo=True)
+        for trade in trades:
+            trade_queue.add_trade(trade)
+
+        self.assertEqual(trade_queue.all_trades, trades)
+        self.assertEqual(
+            trade_queue.unpaired_trades,
+            [Trade("BTC", Decimal("0.3"), 11000, dt.datetime.today()),],
+        )
+
+        paired_trades = [
+            PairedTrades(
+                paired_trades=[
+                    Trade("BTC", Decimal("1"), 10000, dt.datetime.today()),
+                    Trade("BTC", Decimal("0.2"), 11000, dt.datetime.today()),
+                ],
+                later_trade=Trade(
+                    "BTC", Decimal("-1.2"), 11500, dt.datetime.today()
+                ),
+            )
+        ]
+        self.assertEqual(trade_queue.paired_trades, paired_trades)
+
     def test_cannot_match_qty(self):
         trades = [
             Trade("BTC", Decimal("1"), 10000, dt.datetime.today()),
@@ -159,6 +189,7 @@ class TestTradeQueue(unittest.TestCase):
             trade_queue.add_trade(
                 Trade("BTC", Decimal("-.1"), 10000, earlier_dt,)
             )
+
 
 if __name__ == "__main__":
     unittest.main()
