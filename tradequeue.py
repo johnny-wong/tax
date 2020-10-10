@@ -9,7 +9,7 @@ from copy import deepcopy
 class Trade:
     instrument: str
     qty: Decimal
-    price: float
+    price: Decimal
     trade_dt: dt.datetime
 
 

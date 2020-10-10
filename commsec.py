@@ -7,7 +7,7 @@ from dateutil.relativedelta import relativedelta
 
 import tradequeue as tq
 
-trades_csv_path = r"C:\Users\johnn\data\tax\commsec_trades.csv"
+trades_csv_path = r"C:\Users\johnn\data\tax\2019_2020\commsec_trades.csv"
 
 FYI_START = dt.datetime(2019, 7, 1)
 FYI_END = dt.datetime(2020, 6, 30)
@@ -58,55 +58,57 @@ class CommsecParser:
 
         return trade
 
+def main():
+    commsec_trades: List[tq.Trade] = []
+    with open(trades_csv_path, "r") as f:
+        commsec_csv = csv.reader(f)
+        commsec_parser = CommsecParser()
+        for row in commsec_csv:
+            potential_trade = commsec_parser.row_to_trade(row)
+            if potential_trade:
+                commsec_trades.append(potential_trade)
 
-commsec_trades: List[tq.Trade] = []
-with open(trades_csv_path, "r") as f:
-    commsec_csv = csv.reader(f)
-    commsec_parser = CommsecParser()
-    for row in commsec_csv:
-        potential_trade = commsec_parser.row_to_trade(row)
-        if potential_trade:
-            commsec_trades.append(potential_trade)
+    dict_trade_queues: Dict[str, tq.TradeQueue] = {}
 
-dict_trade_queues: Dict[str, tq.TradeQueue] = {}
+    for trade in reversed(commsec_trades):
+        instrument = trade.instrument
+        try:
+            dict_trade_queues[instrument].add_trade(trade)
+        except KeyError:
+            dict_trade_queues[instrument] = tq.TradeQueue(instrument, is_fifo=True)
+            dict_trade_queues[instrument].add_trade(trade)
 
-for trade in reversed(commsec_trades):
-    instrument = trade.instrument
-    try:
-        dict_trade_queues[instrument].add_trade(trade)
-    except KeyError:
-        dict_trade_queues[instrument] = tq.TradeQueue(instrument, is_fifo=True)
-        dict_trade_queues[instrument].add_trade(trade)
+    for instrument, instrument_trade_queue in dict_trade_queues.items():
+        this_fy_closing_trades = filter(
+            lambda paired_trade: FYI_START
+            <= paired_trade.closing_trade.trade_dt
+            <= FYI_END,
+            instrument_trade_queue.closed_trade_pairs,
+        )
 
-paired_ivv_trades = dict_trade_queues["IVV"].closed_trade_pairs
-this_fy_closing_trades = filter(
-    lambda paired_trade: FYI_START
-    <= paired_trade.closing_trade.trade_dt
-    <= FYI_END,
-    paired_ivv_trades,
-)
+        cgt_discount_trades = []
+        non_cgt_discount_trades = []
+        for trade_pair in this_fy_closing_trades:
+            if (
+                trade_pair.opening_trade.trade_dt
+                < trade_pair.closing_trade.trade_dt + relativedelta(months=-12)
+            ):
+                # Longer than 12 months
+                cgt_discount_trades.append(trade_pair)
+            else:
+                non_cgt_discount_trades.append(trade_pair)
 
-cgt_discount_trades = []
-non_cgt_discount_trades = []
-for trade_pair in this_fy_closing_trades:
-    if (
-        trade_pair.opening_trade.trade_dt
-        < trade_pair.closing_trade.trade_dt + relativedelta(months=-12)
-    ):
-        # Longer than 12 months
-        cgt_discount_trades.append(trade_pair)
-    else:
-        non_cgt_discount_trades.append(trade_pair)
+        for discount_eligibility, tradeslist in zip(
+            ["CGT discount", "non CGT discount"],
+            [cgt_discount_trades, non_cgt_discount_trades],
+        ):
+            pnl = Decimal("0")
+            for trade in tradeslist:
+                pnl += (
+                    trade.closing_trade.price - trade.opening_trade.price
+                ) * trade.opening_trade.qty
 
-for discount_eligibility, tradeslist in zip(
-    ["CGT discount", "non CGT discount"],
-    [cgt_discount_trades, non_cgt_discount_trades],
-):
-    pnl = Decimal("0")
-    for trade in tradeslist:
-        pnl += (
-            trade.closing_trade.price - trade.opening_trade.price
-        ) * trade.opening_trade.qty
+            print(f"{instrument} {discount_eligibility}: ${pnl:,.2f}")
 
-    print(f"{discount_eligibility}: {pnl}")
-
+if __name__ == "__main__":
+    main()
