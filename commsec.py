@@ -99,7 +99,7 @@ def main():
                 non_cgt_discount_trades.append(trade_pair)
 
         for discount_eligibility, tradeslist in zip(
-            ["CGT discount", "non CGT discount"],
+            ["CGT discount eligible", "non CGT discount eligible"],
             [cgt_discount_trades, non_cgt_discount_trades],
         ):
             pnl = Decimal("0")
