@@ -3,7 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import DefaultDict, Dict, List, Tuple, Union
-
+from copy import deepcopy
 
 @dataclass
 class Trade:
@@ -15,8 +15,8 @@ class Trade:
 
 @dataclass
 class PairedTrades:
-    later_trade: Trade
-    paired_trades: List[Trade]
+    opening_trade: Trade
+    closing_trade: Trade
 
 
 class TradeQueue:
@@ -28,8 +28,8 @@ class TradeQueue:
         self.is_fifo = is_fifo
         self.instrument = instrument
         self.all_trades: List[Trade] = []
-        self.unpaired_trades: List[Trade] = []
-        self.paired_trades: List[PairedTrades] = []
+        self.open_trades: List[Trade] = []
+        self.closed_trade_pairs: List[PairedTrades] = []
 
     def add_trade(self, trade: Trade) -> None:
         if trade.instrument != self.instrument:
@@ -38,53 +38,48 @@ class TradeQueue:
             )
         self.all_trades.append(trade)
         if trade.qty > 0:
-            self.unpaired_trades.append(trade)
-            self.unpaired_trades.sort(key=lambda x: x.trade_dt)
+            self.open_trades.append(trade)
+            self.open_trades.sort(key=lambda x: x.trade_dt)
         else:
             self.pair_trade(trade)
 
-    def pair_trade(self, trade: Trade) -> None:
-        paired_qty: Decimal = Decimal("0")
-        qty_to_pair: Decimal = Decimal(str(abs(trade.qty)))
-        paired_trades = PairedTrades(later_trade=trade, paired_trades=[])
-        while paired_qty < qty_to_pair:
-            idx, next_unpaired_trade = self.get_next_unpaired_trade(
-                trade.instrument, trade.trade_dt
+    def pair_trade(self, closing_trade: Trade) -> None:
+        unpaired_closing_trade = deepcopy(closing_trade)
+        while unpaired_closing_trade.qty < 0:
+            idx, next_unclosed_trade = self.get_next_unclosed_trade(
+                closing_trade.instrument, closing_trade.trade_dt
             )
-            left_to_pair = qty_to_pair - paired_qty
-            if next_unpaired_trade.qty > left_to_pair:
-                excess_unpaired_qty = next_unpaired_trade.qty - left_to_pair
-                paired_trade = Trade(
-                    instrument=trade.instrument,
-                    qty=left_to_pair,
-                    price=next_unpaired_trade.price,
-                    trade_dt=next_unpaired_trade.trade_dt,
-                )
-                paired_trades.paired_trades.append(paired_trade)
-                adjusted_unpaired_trade = next_unpaired_trade
-                adjusted_unpaired_trade.qty = excess_unpaired_qty
-                self.unpaired_trades[idx] = adjusted_unpaired_trade
-                self.paired_trades.append(paired_trades)
-                return None
-            else:
-                paired_trades.paired_trades.append(next_unpaired_trade)
-                del self.unpaired_trades[idx]
-                paired_qty += next_unpaired_trade.qty
-                if paired_qty == qty_to_pair:
-                    self.paired_trades.append(paired_trades)
+            opening_trade_to_pair = deepcopy(next_unclosed_trade)
+            closing_trade_to_pair = deepcopy(unpaired_closing_trade)
+            if next_unclosed_trade.qty > abs(unpaired_closing_trade.qty):
+                # Can close with this unpaired trade. Loop will not iterate again
+                opening_trade_to_pair.qty = abs(unpaired_closing_trade.qty)
+                excess_opening_qty = next_unclosed_trade.qty + unpaired_closing_trade.qty
+                adjusted_unclosed_trade = deepcopy(next_unclosed_trade)
+                adjusted_unclosed_trade.qty = excess_opening_qty
+                self.open_trades[idx] = adjusted_unclosed_trade
+            elif next_unclosed_trade.qty <= abs(unpaired_closing_trade.qty):
+                # Loop may need more iterations to close
+                closing_trade_to_pair.qty = -opening_trade_to_pair.qty
+                del self.open_trades[idx]
 
-    def get_next_unpaired_trade(
+            paired_trades = PairedTrades(opening_trade=opening_trade_to_pair, closing_trade=closing_trade_to_pair)
+            self.closed_trade_pairs.append(paired_trades)
+            unpaired_closing_trade.qty += opening_trade_to_pair.qty
+            
+
+    def get_next_unclosed_trade(
         self, instrument: str, trade_dt: dt.datetime
     ) -> Tuple[int, Trade]:
-        if not len(self.unpaired_trades):
+        if not len(self.open_trades):
             raise ValueError(f"No more unpaired trades for {instrument}")
 
         idx = 0 if self.is_fifo else -1
-        next_unpaired_trade = self.unpaired_trades[idx]
+        next_unclosed_trade = self.open_trades[idx]
 
-        if next_unpaired_trade.trade_dt > trade_dt:
+        if next_unclosed_trade.trade_dt > trade_dt:
             raise ValueError(
                 f"No more unpaired trades for {instrument} before trade time {trade_dt}"
             )
-        return idx, self.unpaired_trades[idx]
+        return idx, self.open_trades[idx]
 
